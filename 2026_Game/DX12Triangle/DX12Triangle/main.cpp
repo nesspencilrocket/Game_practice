@@ -4,65 +4,51 @@
 #include <d3dcompiler.h>
 #include <wrl.h>
 #include <vector>
-#include "d3dx12.h" // プロジェクトフォルダに配置したファイル
+#include "d3dx12.h"
 
 using namespace Microsoft::WRL;
 
-// ライブラリのリンク設定
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
-// --- グローバル変数 ---
 const int FrameCount = 2;
 HWND g_hwnd = nullptr;
 
-// デバイス関連
 ComPtr<ID3D12Device> g_device;
 ComPtr<ID3D12CommandQueue> g_commandQueue;
 ComPtr<IDXGISwapChain3> g_swapChain;
 ComPtr<ID3D12DescriptorHeap> g_rtvHeap;
 ComPtr<ID3D12CommandAllocator> g_commandAllocator;
 ComPtr<ID3D12GraphicsCommandList> g_commandList;
-
-// パイプライン・リソース関連
-ComPtr<ID3D12RootSignature> g_rootSignature; // 修正：追加
+ComPtr<ID3D12RootSignature> g_rootSignature;
 ComPtr<ID3D12PipelineState> g_pipelineState;
 ComPtr<ID3D12Resource> g_renderTargets[FrameCount];
 ComPtr<ID3D12Resource> g_vertexBuffer;
 D3D12_VERTEX_BUFFER_VIEW g_vertexBufferView;
-
-// 同期関連
 ComPtr<ID3D12Fence> g_fence;
 UINT64 g_fenceValue = 0;
 HANDLE g_fenceEvent;
 UINT g_frameIndex = 0;
 
-// 頂点データ構造
 struct Vertex {
     float pos[3];
     float col[4];
 };
 
-// --- 関数プロトタイプ ---
 bool InitD3D();
 void Render();
 void WaitForPreviousFrame();
 LRESULT CALLBACK WindowProc(HWND, UINT, WPARAM, LPARAM);
 
-// --- メイン関数 ---
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
-    // ウィンドウの作成
     WNDCLASSEX windowClass = { sizeof(WNDCLASSEX), CS_HREDRAW | CS_VREDRAW, WindowProc, 0, 0, hInstance, nullptr, nullptr, nullptr, nullptr, L"DX12Sample", nullptr };
     RegisterClassEx(&windowClass);
     g_hwnd = CreateWindow(L"DX12Sample", L"DirectX 12 Triangle", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, 800, 600, nullptr, nullptr, hInstance, nullptr);
 
-    // DirectX 12の初期化
     if (!InitD3D()) return -1;
-
     ShowWindow(g_hwnd, nCmdShow);
 
-    // メインループ
     MSG msg = {};
     while (msg.message != WM_QUIT) {
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -80,17 +66,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 }
 
 bool InitD3D() {
-    // 1. デバイスとファクトリの作成
     ComPtr<IDXGIFactory4> factory;
     CreateDXGIFactory1(IID_PPV_ARGS(&factory));
     D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&g_device));
 
-    // 2. コマンドキューの作成
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
     queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
     g_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&g_commandQueue));
 
-    // 3. スワップチェーンの作成
     DXGI_SWAP_CHAIN_DESC1 scDesc = {};
     scDesc.BufferCount = FrameCount;
     scDesc.Width = 800;
@@ -105,13 +88,11 @@ bool InitD3D() {
     swapChain.As(&g_swapChain);
     g_frameIndex = g_swapChain->GetCurrentBackBufferIndex();
 
-    // 4. レンダーターゲット用目録(Heap)の作成
     D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
     rtvHeapDesc.NumDescriptors = FrameCount;
     rtvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
     g_device->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&g_rtvHeap));
 
-    // 5. レンダーターゲットビュー(RTV)の作成
     SIZE_T rtvDescriptorSize = g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(g_rtvHeap->GetCPUDescriptorHandleForHeapStart());
     for (UINT n = 0; n < FrameCount; n++) {
@@ -122,7 +103,6 @@ bool InitD3D() {
 
     g_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&g_commandAllocator));
 
-    // 6. ルートシグネチャ（シェーダーの口）の作成
     CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
     rootSignatureDesc.Init(0, nullptr, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT);
     ComPtr<ID3DBlob> signature;
@@ -130,7 +110,6 @@ bool InitD3D() {
     D3D12SerializeRootSignature(&rootSignatureDesc, D3D_ROOT_SIGNATURE_VERSION_1, &signature, &error);
     g_device->CreateRootSignature(0, signature->GetBufferPointer(), signature->GetBufferSize(), IID_PPV_ARGS(&g_rootSignature));
 
-    // 7. シェーダーのコンパイルとPSO作成
     ComPtr<ID3DBlob> vertexShader;
     ComPtr<ID3DBlob> pixelShader;
     D3DCompileFromFile(L"Shader.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", 0, 0, &vertexShader, nullptr);
@@ -157,18 +136,20 @@ bool InitD3D() {
     psoDesc.SampleDesc.Count = 1;
     g_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&g_pipelineState));
 
-    // 8. コマンドリストの作成
     g_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, g_commandAllocator.Get(), g_pipelineState.Get(), IID_PPV_ARGS(&g_commandList));
     g_commandList->Close();
 
-    // 9. 頂点データの作成
     Vertex triangleVertices[] = {
         { { 0.0f, 0.5f, 0.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },
         { { 0.5f, -0.5f, 0.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },
         { { -0.5f, -0.5f, 0.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } }
     };
     const UINT vertexBufferSize = sizeof(triangleVertices);
-    g_device->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE, &CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize), D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&g_vertexBuffer));
+
+    // --- C2102 修正箇所：一時的な変数を定義 ---
+    auto heapProps = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    auto resDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
+    g_device->CreateCommittedResource(&heapProps, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&g_vertexBuffer));
 
     UINT8* pVertexDataBegin;
     g_vertexBuffer->Map(0, nullptr, reinterpret_cast<void**>(&pVertexDataBegin));
@@ -179,7 +160,6 @@ bool InitD3D() {
     g_vertexBufferView.StrideInBytes = sizeof(Vertex);
     g_vertexBufferView.SizeInBytes = vertexBufferSize;
 
-    // 10. フェンスの作成
     g_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&g_fence));
     g_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
@@ -191,24 +171,30 @@ void Render() {
     g_commandList->Reset(g_commandAllocator.Get(), g_pipelineState.Get());
 
     g_commandList->SetGraphicsRootSignature(g_rootSignature.Get());
-    g_commandList->RSSetViewports(1, &CD3DX12_VIEWPORT(0.0f, 0.0f, 800.0f, 600.0f));
-    g_commandList->RSSetScissorRects(1, &CD3DX12_RECT(0, 0, 800, 600));
 
-    // 状態遷移：表示用 -> 描画用
-    g_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(g_renderTargets[g_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET));
+    // --- C2102 修正箇所：ビューポートとシザーも変数に格納 ---
+    auto viewport = CD3DX12_VIEWPORT(0.0f, 0.0f, 800.0f, 600.0f);
+    auto scissorRect = CD3DX12_RECT(0, 0, 800, 600);
+    g_commandList->RSSetViewports(1, &viewport);
+    g_commandList->RSSetScissorRects(1, &scissorRect);
+
+    // --- C2102 修正箇所：バリアも変数に格納 ---
+    auto barrierToRT = CD3DX12_RESOURCE_BARRIER::Transition(g_renderTargets[g_frameIndex].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    g_commandList->ResourceBarrier(1, &barrierToRT);
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(g_rtvHeap->GetCPUDescriptorHandleForHeapStart(), g_frameIndex, g_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV));
     g_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-    // 背景クリアと描画命令
     const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
     g_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
     g_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     g_commandList->IASetVertexBuffers(0, 1, &g_vertexBufferView);
     g_commandList->DrawInstanced(3, 1, 0, 0);
 
-    // 状態遷移：描画用 -> 表示用
-    g_commandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(g_renderTargets[g_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT));
+    // --- C2102 修正箇所：バリア（戻し）も変数に格納 ---
+    auto barrierToPresent = CD3DX12_RESOURCE_BARRIER::Transition(g_renderTargets[g_frameIndex].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+    g_commandList->ResourceBarrier(1, &barrierToPresent);
+
     g_commandList->Close();
 
     ID3D12CommandList* ppCommandLists[] = { g_commandList.Get() };
